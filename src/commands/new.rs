@@ -5,8 +5,7 @@ use clap::Subcommand;
 use colored::*;
 use dialoguer::{theme::ColorfulTheme, Confirm, Input, Select};
 use std::fs;
-use std::path::{Path, PathBuf};
-use uuid::Uuid;
+use std::path::Path;
 
 #[derive(Subcommand)]
 pub enum NewCommands {
@@ -859,6 +858,7 @@ Source: `{source}`
 
 // ── Template Marketplace ──────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 fn handle_template_search(query: &str, tags: Option<&str>) -> Result<()> {
     p::header("Template Marketplace — Search");
     p::kv("Query", query);
@@ -915,6 +915,7 @@ fn handle_template_search(query: &str, tags: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 fn scaffold_from_marketplace(name: String, template_name: String) -> Result<()> {
     p::header(&format!("Scaffolding from Marketplace: {}", template_name));
     
@@ -976,6 +977,7 @@ fn scaffold_from_marketplace(name: String, template_name: String) -> Result<()> 
     Ok(())
 }
 
+#[allow(dead_code)]
 fn copy_template_contents(src: &Path, dst: &Path, project_name: &str) -> Result<()> {
     for entry in fs::read_dir(src)? {
         let entry = entry?;

@@ -1,8 +1,7 @@
 use crate::utils::{print as p, templates};
 use anyhow::Result;
 use clap::Subcommand;
-use colored::*;
-use dialoguer::{Confirm, Input};
+use dialoguer::Input;
 use std::path::PathBuf;
 
 #[derive(Subcommand)]
