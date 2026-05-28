@@ -270,6 +270,20 @@ fn monitor_wallet(
             ));
         }
 
+        if let Some(alert_level) = balance_alert {
+            if native < alert_level {
+                if !low_balance_alerted {
+                    notifications::alert(&format!(
+                        "Balance {:.7} XLM dropped below watchman threshold {:.7} XLM",
+                        native, alert_level
+                    ));
+                    low_balance_alerted = true;
+                }
+            } else {
+                low_balance_alerted = false;
+            }
+        }
+
         std::thread::sleep(std::time::Duration::from_secs(interval.max(1)));
     }
 
