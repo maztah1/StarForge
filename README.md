@@ -25,8 +25,8 @@ This project is actively maintained and participates in the [Stellar Wave Progra
 ### ?? Wallet Management
 Create and manage Stellar ed25519 keypairs locally. Generate cryptographically secure keys using proper Stellar strkey encoding (G... for public, S... for secret). Optionally encrypt keys at rest with AES-256-GCM. Fund testnet accounts via Friendbot, list all saved wallets, inspect live on-chain balances, and securely store keys in `~/.starforge/config.toml`.
 
-### ◻ Project Scaffolding
-Scaffold new Soroban smart contract projects from battle-tested templates with one command. Choose from: `hello-world`, `token`, `nft`, `voting`, `stablecoin`, and `escrow`. Use interactive mode (`--interactive`) to customize contract options like author, license, storage type, and test inclusion. Also scaffolds full Stellar dApp frontends (Vite + React).
+### ? Project Scaffolding
+Scaffold new Soroban smart contract projects from battle-tested templates with one command. Choose from: `hello-world`, `token`, `nft`, and `voting`. Use interactive mode (`--interactive`) to customize contract options like author, license, storage type, and test inclusion. Also scaffolds full Stellar dApp frontends (Vite + React).
 
 **NEW: Template Marketplace** - Discover and use community-contributed templates:
 ```bash
@@ -115,12 +115,6 @@ starforge wallet multisig create treasury \
   --threshold 2 \
   --signers alice,bob,charlie \
   --xdr-output treasury-setup.json
-```
-
-Hardware wallet support is behind the `hardware-wallet` feature flag. Build it with:
-
-```bash
-cargo build --release --features hardware-wallet
 ```
 
 Wallet rotation keeps the same local wallet name in `~/.starforge/config.toml`, but it creates a brand-new on-chain Stellar account keypair. Any scripts, signer sets, or deployment flows that referenced the previous public key still need to be updated separately.
