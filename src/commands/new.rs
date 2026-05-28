@@ -29,6 +29,9 @@ pub enum NewCommands {
         /// Filter templates by tags (comma-separated)
         #[arg(long)]
         tags: Option<String>,
+        /// Generate `.github/workflows/stellar-ci.yml` (cargo test + WASM size checks)
+        #[arg(long)]
+        ci: bool,
     },
     /// Scaffold a new Stellar dApp (Vite + React)
     Dapp {
@@ -52,6 +55,7 @@ pub fn handle(cmd: NewCommands) -> Result<()> {
             search,
             interactive,
             tags,
+            ci,
         } => {
             if let Some(query) = search {
                 return handle_template_search(&query, tags.as_deref());
@@ -70,6 +74,7 @@ pub fn handle(cmd: NewCommands) -> Result<()> {
                     "",
                     "none",
                     true,
+                    ci,
                 )
             }
         }
@@ -117,6 +122,7 @@ struct ContractOptions {
     license: String,
     storage: String,
     include_tests: bool,
+    include_ci: bool,
 }
 
 fn scaffold_contract_interactive(default_name: String) -> Result<()> {
@@ -161,12 +167,19 @@ fn scaffold_contract_interactive(default_name: String) -> Result<()> {
         .default(true)
         .interact()?;
 
+    // 6. CI workflow
+    let include_ci = Confirm::with_theme(&theme)
+        .with_prompt("Include GitHub Actions CI (stellar-ci.yml)?")
+        .default(false)
+        .interact()?;
+
     let opts = ContractOptions {
         name,
         author,
         license,
         storage,
         include_tests,
+        include_ci,
     };
 
     // Summary + confirm
@@ -179,6 +192,14 @@ fn scaffold_contract_interactive(default_name: String) -> Result<()> {
     println!(
         "    Tests         : {}",
         if opts.include_tests {
+            "yes".green()
+        } else {
+            "no".yellow()
+        }
+    );
+    println!(
+        "    CI workflow   : {}",
+        if opts.include_ci {
             "yes".green()
         } else {
             "no".yellow()
@@ -204,6 +225,7 @@ fn scaffold_contract_interactive(default_name: String) -> Result<()> {
         &opts.author,
         &opts.storage,
         opts.include_tests,
+        opts.include_ci,
     )
 }
 
@@ -215,6 +237,7 @@ fn scaffold_contract(
     author: &str,
     storage: &str,
     include_tests: bool,
+    include_ci: bool,
 ) -> Result<()> {
     let dir = Path::new(&name);
     if dir.exists() {
@@ -257,6 +280,16 @@ fn scaffold_contract(
 
     p::step(4, 4, "Writing README.md…");
     fs::write(dir.join("README.md"), readme(&name, &template, source))?;
+
+    if include_ci {
+        p::info("Adding GitHub Actions CI workflow…");
+        let workflow_dir = dir.join(".github/workflows");
+        fs::create_dir_all(&workflow_dir)?;
+        fs::write(
+            workflow_dir.join("stellar-ci.yml"),
+            stellar_ci_workflow(&name),
+        )?;
+    }
 
     println!();
     p::success(&format!("Contract '{}' scaffolded!", name));
@@ -1300,6 +1333,60 @@ fn scaffold_from_marketplace(name: String, template_name: String) -> Result<()> 
     println!();
 
     Ok(())
+}
+
+/// GitHub Actions workflow for Soroban contract projects (cargo test + WASM size gate).
+fn stellar_ci_workflow(crate_name: &str) -> String {
+    let wasm_path = format!(
+        "target/wasm32-unknown-unknown/release/{}.wasm",
+        crate_name.replace('-', "_")
+    );
+    format!(
+        r#"name: Stellar CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  MAX_WASM_BYTES: 131072
+
+jobs:
+  test-and-wasm:
+    name: Test & WASM size
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install Stellar CLI
+        run: cargo install --locked stellar-cli --features opt
+
+      - name: Run unit tests
+        run: cargo test --locked
+
+      - name: Build Soroban WASM
+        run: stellar contract build
+
+      - name: Check WASM artifact size
+        run: |
+          WASM="{wasm_path}"
+          if [ ! -f "$WASM" ]; then
+            echo "WASM not found at $WASM"
+            exit 1
+          fi
+          SIZE=$(wc -c < "$WASM" | tr -d ' ')
+          echo "WASM size: $SIZE bytes (limit: $MAX_WASM_BYTES)"
+          if [ "$SIZE" -gt "$MAX_WASM_BYTES" ]; then
+            echo "WASM exceeds $MAX_WASM_BYTES byte limit"
+            exit 1
+          fi
+"#
+    )
 }
 
 #[allow(dead_code)]

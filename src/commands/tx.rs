@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 use colored::*;
 
-use crate::utils::{config, crypto, horizon, print as p};
+use crate::utils::{config, crypto, horizon, print as p, tx_batch};
 
 #[derive(Args)]
 pub struct TxArgs {
@@ -14,6 +14,8 @@ pub struct TxArgs {
 pub enum TxCommands {
     /// Send a Stellar payment transaction
     Send(SendArgs),
+    /// Submit multiple operations in one transaction from a JSON file
+    Batch(BatchArgs),
     /// Fetch and display recent transactions for a Stellar account
     History {
         /// Account public key
@@ -43,6 +45,22 @@ pub enum TxCommands {
 }
 
 #[derive(Args)]
+pub struct BatchArgs {
+    /// Path to operations JSON file
+    #[arg(long)]
+    pub file: std::path::PathBuf,
+    /// Wallet name to send from
+    #[arg(long)]
+    pub from: String,
+    /// Network to use
+    #[arg(long, default_value = "testnet", value_parser = ["testnet", "mainnet"])]
+    pub network: String,
+    /// Skip confirmation prompt
+    #[arg(long, default_value = "false")]
+    pub yes: bool,
+}
+
+#[derive(Args)]
 pub struct SendArgs {
     /// Wallet name to send from
     #[arg(long)]
@@ -67,6 +85,7 @@ pub struct SendArgs {
 pub fn handle(args: TxArgs) -> Result<()> {
     match args.command {
         TxCommands::Send(args) => handle_send(args),
+        TxCommands::Batch(args) => handle_batch(args),
         TxCommands::History {
             public_key,
             limit,
@@ -86,6 +105,163 @@ pub fn handle(args: TxArgs) -> Result<()> {
             successful_only: successful,
             details,
         }),
+    }
+}
+
+fn handle_batch(args: BatchArgs) -> Result<()> {
+    p::header("Batch Stellar Transaction");
+
+    config::validate_wallet_name(&args.from)?;
+    config::validate_network(&args.network)?;
+
+    let doc = tx_batch::load_batch_file(&args.file)?;
+    tx_batch::validate_batch_operations(&doc.operations)?;
+
+    let cfg = config::load()?;
+    let wallet = cfg
+        .wallets
+        .iter()
+        .find(|w| w.name == args.from)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Wallet '{}' not found. Run `starforge wallet list`",
+                args.from
+            )
+        })?;
+
+    if wallet.secret_key.is_none() {
+        anyhow::bail!("Wallet '{}' has no secret key stored", args.from);
+    }
+
+    let payment_ops: Vec<horizon::BatchPaymentOp> = doc
+        .operations
+        .iter()
+        .map(batch_operation_to_payment)
+        .collect::<Result<Vec<_>>>()?;
+
+    p::separator();
+    p::kv("From Wallet", &wallet.name);
+    p::kv("From Address", &wallet.public_key);
+    p::kv("Operations", &doc.operations.len().to_string());
+    p::kv("Batch File", &args.file.display().to_string());
+    p::kv("Network", &args.network);
+
+    if args.network == "mainnet" {
+        p::warn("You are submitting on MAINNET. This will cost real XLM.");
+    }
+
+    for (i, op) in payment_ops.iter().enumerate() {
+        let asset_label = match (&op.asset_code, &op.asset_issuer) {
+            (None, None) => "XLM".to_string(),
+            (Some(code), Some(issuer)) => format!("{}:{}", code, issuer),
+            _ => "unknown".to_string(),
+        };
+        p::kv(
+            &format!("Op {}", i + 1),
+            &format!("payment → {} {} {}", op.destination, op.amount, asset_label),
+        );
+    }
+
+    p::separator();
+
+    println!();
+    p::step(1, 2, "Fetching source account info…");
+    let source_account =
+        horizon::fetch_account(&wallet.public_key, &args.network).map_err(|e| {
+            anyhow::anyhow!(
+                "Source account not found on {}: {}\nFund it with: starforge wallet fund {}",
+                args.network,
+                e,
+                wallet.name
+            )
+        })?;
+
+    p::step(2, 2, "Building batch transaction…");
+    let tx_result = horizon::build_and_simulate_batch(
+        &wallet.public_key,
+        &payment_ops,
+        &source_account.sequence,
+        &args.network,
+    )?;
+
+    p::kv(
+        "Estimated Fee",
+        &format!("{:.7} XLM", tx_result.fee as f64 / 10_000_000.0),
+    );
+    p::kv(
+        "Transaction XDR",
+        &format!("{}...", &tx_result.transaction_xdr[..tx_result.transaction_xdr.len().min(20)]),
+    );
+
+    if !args.yes {
+        println!();
+        print!("  Proceed with batch transaction? [y/N] ");
+        use std::io::BufRead;
+        let line = std::io::stdin()
+            .lock()
+            .lines()
+            .next()
+            .unwrap_or(Ok(String::new()))?;
+        if !matches!(line.trim().to_lowercase().as_str(), "y" | "yes") {
+            p::info("Batch transaction cancelled.");
+            return Ok(());
+        }
+    }
+
+    println!();
+
+    let mut secret_key = wallet.secret_key.as_ref().unwrap().clone();
+    if secret_key.contains(':') {
+        let pwd = crypto::prompt_password(
+            &format!("Enter password to decrypt wallet '{}'", wallet.name),
+            false,
+        )?;
+        secret_key = crypto::decrypt_secret(&pwd, &secret_key)?;
+    }
+
+    p::info("Submitting batch transaction…");
+    let submit_result = horizon::submit_payment_transaction(
+        &tx_result.transaction_xdr,
+        &secret_key,
+        &args.network,
+    )?;
+
+    println!();
+    p::separator();
+    println!(
+        "  {} {}",
+        "✓".green().bold(),
+        "Batch transaction submitted successfully!".bright_white()
+    );
+    println!();
+    p::kv_accent("Transaction Hash", &submit_result.hash);
+
+    let explorer_base = if args.network == "mainnet" {
+        "https://stellar.expert/explorer/public/tx"
+    } else {
+        "https://stellar.expert/explorer/testnet/tx"
+    };
+
+    p::kv(
+        "Stellar Expert",
+        &format!("{}/{}", explorer_base, submit_result.hash),
+    );
+    p::separator();
+
+    Ok(())
+}
+
+fn batch_operation_to_payment(op: &tx_batch::BatchOperation) -> Result<horizon::BatchPaymentOp> {
+    match op {
+        tx_batch::BatchOperation::Payment { to, amount, asset } => {
+            let (asset_code, asset_issuer) = parse_asset(asset)?;
+            Ok(horizon::BatchPaymentOp {
+                destination: to.clone(),
+                amount: amount.clone(),
+                asset_code,
+                asset_issuer,
+            })
+        }
     }
 }
 
