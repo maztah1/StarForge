@@ -249,6 +249,10 @@ fn get_rpc_url(network: &str) -> String {
     }
 }
 
+pub fn rpc_url(network: &str) -> String {
+    get_rpc_url(network)
+}
+
 fn rpc_request_with_url<T>(rpc_url: &str, request: SorobanRpcRequest) -> Result<T>
 where
     T: DeserializeOwned,
@@ -397,7 +401,11 @@ fn build_and_sign_transaction(
     ))
 }
 
-fn build_deploy_transaction_xdr(wasm_hash: &str, wallet: &WalletEntry, network: &str) -> Result<String> {
+fn build_deploy_transaction_xdr(
+    wasm_hash: &str,
+    wallet: &WalletEntry,
+    network: &str,
+) -> Result<String> {
     Ok(format!(
         "mock_deploy_transaction_xdr_{}_{}_{}",
         wasm_hash, wallet.public_key, network
@@ -443,7 +451,8 @@ fn extract_simulation_errors(result: &serde_json::Value) -> Vec<String> {
         .get("results")
         .and_then(|results| results.as_array())
         .map(|items| {
-            items.iter()
+            items
+                .iter()
                 .filter_map(|item| item.get("error").map(|err| err.to_string()))
                 .collect::<Vec<_>>()
         })
@@ -598,4 +607,3 @@ mod tests {
             .contains("Expected a Stellar contract strkey"));
     }
 }
-
