@@ -122,6 +122,7 @@ struct ContractOptions {
     license: String,
     storage: String,
     include_tests: bool,
+    include_ci: bool,
 }
 
 fn scaffold_contract_interactive(default_name: String) -> Result<()> {
@@ -166,12 +167,19 @@ fn scaffold_contract_interactive(default_name: String) -> Result<()> {
         .default(true)
         .interact()?;
 
+    // 6. CI workflow
+    let include_ci = Confirm::with_theme(&theme)
+        .with_prompt("Include GitHub Actions CI (stellar-ci.yml)?")
+        .default(false)
+        .interact()?;
+
     let opts = ContractOptions {
         name,
         author,
         license,
         storage,
         include_tests,
+        include_ci,
     };
 
     // Summary + confirm
@@ -184,6 +192,14 @@ fn scaffold_contract_interactive(default_name: String) -> Result<()> {
     println!(
         "    Tests         : {}",
         if opts.include_tests {
+            "yes".green()
+        } else {
+            "no".yellow()
+        }
+    );
+    println!(
+        "    CI workflow   : {}",
+        if opts.include_ci {
             "yes".green()
         } else {
             "no".yellow()
@@ -209,7 +225,7 @@ fn scaffold_contract_interactive(default_name: String) -> Result<()> {
         &opts.author,
         &opts.storage,
         opts.include_tests,
-        false,
+        opts.include_ci,
     )
 }
 
